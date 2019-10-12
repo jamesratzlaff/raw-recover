@@ -25,6 +25,7 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import com.jamesratzlaff.util.function.ObjIntBiPredicate;
+import com.jamesratzlaff.util.io.EndOfFileGetter;
 
 
 
@@ -765,8 +766,22 @@ public class RawDisk {
 		}
 
 	}
+	
+	public static void scanDisk(DiskInfoCollector collector) {
+		try {
+			collector.search();
+			collector.reduce();
+			
+		} catch(RuntimeException re) {
+			System.err.println("Exiting due to runtime exception (it could just be we reached the end of the drive)");
+			System.err.println(re);
+		} finally {
+			System.out.println(collector);
+		}
+		
+	}
 
-	public static void main(String[] args) {
+	public static void main(String[] args) throws Exception {
 		if (args.length < 1) {
 			args = new String[] { "\\\\.\\PhysicalDrive0" };
 		}
@@ -780,17 +795,9 @@ public class RawDisk {
 		List<Long> skips = PredicateMaker.config.getLongList("app.skip.values");
 		
 		DiskInfoCollector collector = new DiskInfoCollector(rd, trackers,skips).setReadAmount(8192);
-		
-		try {
-			collector.search();
-			collector.reduce();
-			
-		} catch(RuntimeException re) {
-			System.err.println("Exiting due to runtime exception (it could just be we reached the end of the drive)");
-			System.err.println(re);
-		} finally {
-			System.out.println(collector);
-		}
+//		scanDisk(collector);
+		long end = EndOfFileGetter.getMp4Size(0x22006000, rd);
+		System.out.println(end);
 
 	}
 
