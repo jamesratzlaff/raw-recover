@@ -6,6 +6,9 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
+
+import com.jamesratzlaff.rawrecover.RawDisk.PredicateTracker;
 
 /**
  * 
@@ -20,6 +23,14 @@ public class SimpleRawFileLocation implements RawFileLocation{
 	private long endOffset;
 	
 	
+	public static List<SimpleRawFileLocation> create(List<PredicateTracker> trackers){
+		List<SimpleRawFileLocation> result = trackers.stream().flatMap(tracker->{
+			List<SimpleRawFileLocation> asList = create(tracker);
+			return asList.stream();
+		}).sorted().collect(Collectors.toList());
+		return result;
+	}
+	
 	public static List<SimpleRawFileLocation> create(Map<String,? extends Collection<Long>> map){
 		int totalLen = map.values().stream().mapToInt(list->list.size()).sum();
 		ArrayList<SimpleRawFileLocation> result = new ArrayList<SimpleRawFileLocation>(totalLen);
@@ -30,6 +41,11 @@ public class SimpleRawFileLocation implements RawFileLocation{
 		});
 		result.trimToSize();
 		Collections.sort(result);
+		return result;
+	}
+	
+	public static List<SimpleRawFileLocation> create(PredicateTracker pt){
+		List<SimpleRawFileLocation> result = create(pt.getName(), pt.getOffsets());
 		return result;
 	}
 	
