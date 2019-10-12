@@ -551,6 +551,10 @@ public class RawDisk {
 
 		}
 		
+		public String getName() {
+			return this.name;
+		}
+		
 		public List<Long> getOffsets(){
 			if(this.offsets==null) {
 				this.offsets=new ArrayList<Long>();
@@ -798,6 +802,7 @@ public class RawDisk {
 //		scanDisk(collector);
 		long end = EndOfFileGetter.getMp4Size(0x22006000, rd);
 		System.out.println(end);
+		
 
 	}
 
