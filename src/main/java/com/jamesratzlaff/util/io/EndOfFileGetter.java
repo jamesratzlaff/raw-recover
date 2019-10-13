@@ -28,6 +28,19 @@ public class EndOfFileGetter {
 		return result;
 	}
 	
+	public static long getRIFFSize(int startOffset, RawDisk rd) throws IOException {
+		long result = -1;
+		int initialBufferSize = 8192;
+		if(rd!=null) {
+			ByteBuffer bb = ByteBuffer.wrap(new byte[initialBufferSize]).order(ByteOrder.LITTLE_ENDIAN);
+			rd.read(bb, startOffset);
+			result=bb.getInt(1);
+			
+		}
+		return result;
+		
+	}
+	
 	/**
 	 * 
 	 * @param startOffset

@@ -27,10 +27,13 @@ public interface RawFileLocation extends Comparable<RawFileLocation>, Serializab
 		}
 		return Long.compareUnsigned(this.getStartOffset(), this.getEndOffset());
 	}
+	
+	default boolean containsLocation(long location) {
+		return getStartOffset()<=location&&location<getEndOffset();
+	}
 	/*
 	 * TODO: add methods:
 	 * default boolean overlapsWith(RawFileLocation other)
-	 * default boolean containsLocation(long location)
 	 */
 	
 	

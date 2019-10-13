@@ -20,7 +20,7 @@ public class SimpleRawFileLocation implements RawFileLocation{
 	private static final long serialVersionUID = -3135942373708404445L;
 	private final String type;
 	private long startOffset;
-	private long endOffset;
+	private long endOffset=-1;
 	
 	
 	public static List<SimpleRawFileLocation> create(List<PredicateTracker> trackers){
@@ -76,6 +76,10 @@ public class SimpleRawFileLocation implements RawFileLocation{
 
 	public void setStartOffset(long startOffset) {
 		this.startOffset = startOffset;
+	}
+	
+	public void setLength(long sizeInBytes) {
+		this.endOffset=getStartOffset()+sizeInBytes;
 	}
 
 	public long getEndOffset() {
