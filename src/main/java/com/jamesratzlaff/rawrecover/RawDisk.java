@@ -15,6 +15,7 @@ import java.time.LocalDate;
 import java.time.Period;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
@@ -26,6 +27,7 @@ import java.util.stream.Collectors;
 
 import com.jamesratzlaff.util.function.ObjIntBiPredicate;
 import com.jamesratzlaff.util.io.EndOfFileGetter;
+import com.jamesratzlaff.util.io.db.Database;
 
 
 
@@ -195,12 +197,17 @@ public class RawDisk {
 		return Long.MAX_VALUE;
 	}
 
+	public static long getContainingSectorOffset(long offset) {
+		return ((offset/DEFAULT_SECTOR_SIZE)*DEFAULT_SECTOR_SIZE);
+	}
+	
 	public ByteBuffer read(ByteBuffer bb, long offset) throws IOException {
 
 		if (bb == null) {
 			byte[] bs = new byte[DEFAULT_SECTOR_SIZE];
 			bb = ByteBuffer.wrap(bs);
 		}
+		
 		int read = getFileChannel().read(bb, offset);
 
 		return bb;
@@ -622,7 +629,7 @@ public class RawDisk {
 			builder.append("PredicateTracker ").append('(').append(getOffsets().size()).append(" elements) [name=");
 			builder.append(name);
 			builder.append(", offsets=");
-			builder.append(String.join(",\n",getOffsets().stream().map(Long::toHexString).collect(Collectors.toList())));
+			builder.append(String.join(",\n",getOffsets().stream().map(l->l.toString()).collect(Collectors.toList())));
 			builder.append("]");
 			return builder.toString();
 		}
@@ -789,7 +796,7 @@ public class RawDisk {
 		if (args.length < 1) {
 			args = new String[] { "\\\\.\\PhysicalDrive0" };
 		}
-
+		long startTime = System.currentTimeMillis();
 		List<String> preds = PredicateMaker.config.getStringList("app.use-predicates");
 		List<PredicateTracker> trackers = preds.stream().map(PredicateTracker::new).collect(Collectors.toList());
 		
@@ -798,13 +805,80 @@ public class RawDisk {
 //		rd.seekInFileChannel(0x1F601000l);
 		List<Long> skips = PredicateMaker.config.getLongList("app.skip.values");
 		
-		DiskInfoCollector collector = new DiskInfoCollector(rd, trackers,skips).setReadAmount(8192);
+//		DiskInfoCollector collector = new DiskInfoCollector(rd, trackers,skips).setReadAmount(8192);
 //		scanDisk(collector);
-		long end = EndOfFileGetter.getMp4Size(0x22006000, rd);
-		System.out.println(end);
+		Database db = new Database();
+		List<RawFileLocation> locations =db.getRawOffsets();//.stream().filter(ro->ro.getEndOffset()!=-1).collect(Collectors.toList());
+		locations.forEach(l->{
+			try {
+				l.endsInPaddedCluster(rd);
+			} catch (IOException e) {
+				
+			}
+		});
+//		db.resetAll(locations);
+//		List<RawFileLocation> locations = loadLocationsFromConfig("MP4","JPEG","RIFF","PNG","SQLITE","WEBM","ASF");
 		
+//		findEnds(locations,rd);
+//		printStats(locations);
+		db.merge(locations);
+		long endTime = System.currentTimeMillis();
+		System.out.println("Total run time: "+(endTime-startTime)+" ms");
 
 	}
+	
+	public static void printStats(List<RawFileLocation> locations) {
+		System.out.println("Total file locations: "+locations.size());
+		System.out.println("Total size of file with known end locations: "+locations.stream().filter(l->l.getEndOffset()!=-1).mapToLong(l->l.getLength()).sum());
+		System.out.println("Largest file size: "+locations.stream().filter(l->l.getEndOffset()!=-1).mapToLong(l->l.getLength()).max().orElse(0));
+		System.out.println("Total files where end could not be found: "+locations.stream().filter(l->l.getEndOffset()==-1).count());
+	}
+	
+	public static void findEnds(List<RawFileLocation> rfls, RawDisk rd) {
+		for(int i=0;i<rfls.size();i++) {
+			RawFileLocation rfl = rfls.get(i);
+			if(rfl.getEndOffset()==-1) {
+				long start = rfl.getStartOffset();
+				String type = rfl.getType();
+				long maxOffset = i<rfls.size()-1?rfls.get(i+1).getStartOffset():rd.size();
+				long endOffset = -1;
+				try {
+					endOffset = EndOfFileGetter.getEndOffset(start, rd, maxOffset, type);
+				} catch(Exception ioe) {
+					System.err.println("[ERROR]Could not get end offset for "+rfl);
+				}
+				if(endOffset!=-1) {
+					rfl.setEndOffset(endOffset);
+				}
+			}
+		}
+	}
+	
+	
+	private static  List<RawFileLocation> create(String type, List<Long> startOffsets){
+		ArrayList<RawFileLocation> reso = new ArrayList<RawFileLocation>(startOffsets.size());
+		for(int i=0;i<startOffsets.size();i++) {
+			long startOffset = startOffsets.get(i);
+			RawFileLocation rfl = new SimpleRawFileLocation(type, startOffset);
+			reso.add(rfl);
+		}
+		Collections.sort(reso);
+		return reso;
+	}
+	
+	public static List<RawFileLocation> loadLocationsFromConfig(String...types){
+		ArrayList<RawFileLocation> l = new ArrayList<RawFileLocation>();
+		for(int i=0;i<types.length;i++) {
+			String type = types[i];
+			List<Long> startOffsets = PredicateMaker.config.getLongList("app.startOffsets."+type);
+			List<RawFileLocation> asList = create(type, startOffsets);
+			l.addAll(asList);
+		}
+		l.trimToSize();
+		Collections.sort(l);
+		return l;
+	}
+	
 
 //	public static void oldMain(String[] args) {
 //		if (args.length < 1) {
