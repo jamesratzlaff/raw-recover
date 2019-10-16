@@ -14,14 +14,12 @@ import com.jamesratzlaff.rawrecover.RawFileLocation;
 
 public class EndOfFileGetter {
 	private static final byte[] ASF_FILE_PROP_GUID = toByteArray(0xA1, 0xDC, 0xAB, 0x8C, 0x47, 0xA9, 0xCF, 0x11, 0x8E, 0xE4, 0x00, 0xC0, 0x0C, 0x20, 0x53, 0x65);
-
-	
+	private static final byte[] IEND_BYTES = "IEND".getBytes(StandardCharsets.US_ASCII);
+	private static final byte[] JPEG_END = new byte[] {(byte)0xFF,(byte)0xD9};
 	
 	public static long getEndOffset(long startOffset, RawDisk rd, long offsetLimit, String type) throws IOException{
 		long result = -1;
-		if(startOffset==599642112) {
-			System.out.println("derp");
-		}
+
 		if("MP4".equals(type)) {
 			long size = getMp4Size(startOffset, rd);
 			if(size!=-1) {
@@ -38,12 +36,12 @@ public class EndOfFileGetter {
 				result = size+startOffset;
 			}
 		} else if("JPEG".equals(type)) {
-			result = searchFor(startOffset, rd, offsetLimit, new byte[] {(byte)0xFF,(byte)0xD9});
+			result = searchFor(startOffset, rd, offsetLimit, JPEG_END);
 			ByteBuffer bb = ByteBuffer.wrap(new byte[8192]).order(ByteOrder.BIG_ENDIAN);
 			bb=rd.read(bb,startOffset).order(ByteOrder.BIG_ENDIAN);
 			if(bb.getInt(6)==0x45786966&&bb.get(11)==0) {
 				if(result>-1&&result<offsetLimit) {
-					long altResult = searchFor(((result%4096)!=0?4096:0)+((result/4096)*4096), rd, offsetLimit, new byte[] {(byte)0xFF,(byte)0xD9});
+					long altResult = searchFor(((result%4096)!=0?4096:0)+((result/4096)*4096), rd, offsetLimit, JPEG_END);
 					if(altResult<offsetLimit) {
 						result=altResult;
 					}
@@ -51,12 +49,14 @@ public class EndOfFileGetter {
 				}
 			}
 			if(result!=-1) {
-				result+=2;
+				result+=JPEG_END.length;
 			}
 		} else if("PNG".equals(type)) {
-			result = searchFor(startOffset, rd, offsetLimit, "IEND".getBytes(StandardCharsets.US_ASCII));
+			
+			result = searchFor(startOffset, rd, offsetLimit, IEND_BYTES);
 			if(result!=-1) {
-				result+=4;
+				//adding length of IEND_BYTES and the proceeding CRC-32
+				result+=IEND_BYTES.length+Integer.BYTES;
 			}
 		}
 		if(result>offsetLimit) {
@@ -189,15 +189,20 @@ public class EndOfFileGetter {
 		int initialBufferSize = 8192;
 		if(rd!=null) {
 			ByteBuffer bb = ByteBuffer.wrap(new byte[initialBufferSize]);
-			rd.read(bb,startOffset);
-			bb.flip();
+			rd.read(bb,(startOffset/256)*256);
+			bb.rewind();
+			bb.position((int)(startOffset%256));
 			byte[] compareArray = new byte[toSearchFor.length];
 			for(int i=0;result==-1&&((i+startOffset)-toSearchFor.length)<endOffset;) {
 				if(bb.remaining()<toSearchFor.length) {
 					bb=rebuffer(bb,bb.position(),rd,(i+startOffset)+bb.remaining());
+//					HexView.print(bb);
 				}
 				compareArray = get(bb, compareArray);
-				if(Arrays.equals(toSearchFor, compareArray)) {
+				boolean ans = Arrays.equals(toSearchFor, compareArray);
+//				System.out.println(HexView.toHexString(compareArray)+" == "+HexView.toHexString(toSearchFor)+"?"+ ans);
+				
+				if(ans) {
 					result = startOffset+i;
 				}
 				i+=1;

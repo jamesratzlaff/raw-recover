@@ -25,8 +25,9 @@ public class HexView {
 	}
 
 	public String toString(ByteBuffer bb) {
-		bb.rewind();
+		
 		StringBuilder sb = new StringBuilder();
+		int pos = bb.position();
 		int lineNo=0;
 		int maxNum = bb.capacity();
 		int maxNumLen = String.valueOf(maxNum).length();
@@ -40,7 +41,7 @@ public class HexView {
 			sb.append('\n');
 			lineNo+=1;
 		}
-		bb.rewind();
+		bb.position(pos);
 		return sb.toString();
 	}
 
@@ -88,6 +89,7 @@ public class HexView {
 	public byte[] getLine(ByteBuffer bb, int lineNo) {
 		int offset=lineNo*bytesPerLine;
 		byte[] result = new byte[bytesPerLine];
+	
 		bb.get(result,0,Math.min(bb.remaining(), bytesPerLine));
 		return result;
 	}
@@ -104,7 +106,8 @@ public class HexView {
 	}
 	
 	public static void print(ByteBuffer bb) {
-		System.out.println(HEX_VIEW.toString(bb));
+		String hexViewString = HEX_VIEW.toString(bb);
+		System.out.println(hexViewString);
 	}
 
 	private static String toHexString(byte b) {

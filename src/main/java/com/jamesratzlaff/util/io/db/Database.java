@@ -6,8 +6,8 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
+import java.util.function.Predicate;
 
 import com.jamesratzlaff.rawrecover.RawFileLocation;
 import com.jamesratzlaff.rawrecover.SimpleRawFileLocation;
@@ -61,6 +61,25 @@ public class Database {
 		offsets.forEach(offset->offset.setEndOffset(-1));
 		merge(offsets);
 	}
+	
+	public static Predicate<RawFileLocation> whereTypesEqual(String...types){
+		Predicate<RawFileLocation> typePredicate = (p)->true;
+		for(int i=0;i<types.length;i++) {
+			String type = types[i];
+			if(i==0) {
+				typePredicate=typePredicate.and(p->type.equalsIgnoreCase(p.getType()));
+			} else {
+				typePredicate=typePredicate.or(p->type.equalsIgnoreCase(p.getType()));
+			}
+		}
+		return typePredicate;
+	}
+	
+	
+	
+	
+	
+	
 //SELECT OFFSETS.START_OFFSET AS startOffset, OFFSETS.END_OFFSET AS endOffset, TYPES.NAME AS type, (OFFSETS.END_OFFSET-OFFSETS.START_OFFSET) AS SIZE FROM OFFSETS, TYPES WHERE TYPES.ID = OFFSETS.TYPE_ID AND OFFSETS.END_OFFSET>OFFSETS.START_OFFSET ORDER BY SIZE DESC
 	public int[] merge(List<RawFileLocation> offsets) {
 		int[] result = null;
@@ -97,9 +116,12 @@ public class Database {
 		}
 	}
 
+	
+	
 	public static void main(String[] args) throws Exception {
-//		Database db = new Database();
-//		List<RawFileLocation> locations = db.getRawOffsets();
+		Database db = new Database();
+		List<RawFileLocation> locations = db.getRawOffsets();
+		locations.stream().filter(whereTypesEqual("SQLITE")).forEach(System.out::println);;
 //		locations.get(0).setEndOffset(4);
 //		int[] reso = db.merge(locations);
 //		System.out.println(Arrays.toString(reso));

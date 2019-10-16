@@ -23,6 +23,7 @@ public class SimpleRawFileLocation implements RawFileLocation {
 	private long startOffset;
 	private long endOffset = -1;
 	private boolean endsInPaddedCluster = false;
+	private String mozillaCacheUrl;
 
 	public static List<SimpleRawFileLocation> create(List<PredicateTracker> trackers) {
 		List<SimpleRawFileLocation> result = trackers.stream().flatMap(tracker -> {
@@ -122,6 +123,14 @@ public class SimpleRawFileLocation implements RawFileLocation {
 		return endOffset == other.endOffset && startOffset == other.startOffset && Objects.equals(type, other.type);
 	}
 
+	public String getMozillaCacheUrl() {
+		return mozillaCacheUrl;
+	}
+
+	public void setMozillaCacheUrl(String mozillaCacheUrl) {
+		this.mozillaCacheUrl = mozillaCacheUrl;
+	}
+
 	@Override
 	public String toString() {
 		StringBuilder builder = new StringBuilder();
@@ -129,8 +138,15 @@ public class SimpleRawFileLocation implements RawFileLocation {
 		builder.append(type);
 		builder.append(", startOffset=");
 		builder.append(startOffset);
-		builder.append(", endOffset=");
-		builder.append(endOffset);
+		if(endOffset!=-1) {
+			builder.append(", endOffset=");
+			builder.append(endOffset);
+			builder.append(", size=");
+			builder.append(getLength());
+			if(!endsInPaddedCluster()) {
+				builder.append('?');
+			}
+		}
 		builder.append("]");
 		return builder.toString();
 	}
