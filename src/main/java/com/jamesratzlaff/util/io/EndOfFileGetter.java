@@ -189,9 +189,13 @@ public class EndOfFileGetter {
 		int initialBufferSize = 8192;
 		if(rd!=null) {
 			ByteBuffer bb = ByteBuffer.wrap(new byte[initialBufferSize]);
-			rd.read(bb,(startOffset/256)*256);
+			try {
+			rd.read(bb,(startOffset/512)*512);
+			} catch(IOException ioe) {
+				return -1;
+			}
 			bb.rewind();
-			bb.position((int)(startOffset%256));
+			bb.position((int)(startOffset%512));
 			byte[] compareArray = new byte[toSearchFor.length];
 			for(int i=0;result==-1&&((i+startOffset)-toSearchFor.length)<endOffset;) {
 				if(bb.remaining()<toSearchFor.length) {

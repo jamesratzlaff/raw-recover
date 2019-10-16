@@ -3,6 +3,7 @@ package com.jamesratzlaff.rawrecover;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.Serializable;
+import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
@@ -172,8 +173,22 @@ public interface RawFileLocation extends Comparable<RawFileLocation>, Serializab
 					ByteArrayOutputStream bs = new ByteArrayOutputStream();
 					boolean matches = true;
 					bb.position(readOffset);
+					if(bb.remaining()<toMatch.length+1024) {
+						ByteBuffer bigger = ByteBuffer.allocate(bb.remaining()+bb.capacity());
+						int remaining = bb.remaining();
+						
+						bigger.put(bb);
+						readOffset = getTargetAddress(bigger,rd,addy+bb.capacity()+readOffset+remaining);
+						bigger.position(readOffset);
+						bb=bigger;
+					}
 					for (int i = 0; matches && i < toMatch.length; i++) {
-						byte b = bb.get();//Long.toHexString((((int)bb.get(291))&0xFF))
+						byte b = 0;
+						try {
+						b = bb.get();//Long.toHexString((((int)bb.get(291))&0xFF))
+						} catch(BufferUnderflowException bu) {
+							break;
+						}
 						if (b == toMatch[i]) {
 							if (i > 0) {
 								bs.write(b);
