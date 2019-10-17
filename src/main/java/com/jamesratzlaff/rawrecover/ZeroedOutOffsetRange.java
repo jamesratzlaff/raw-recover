@@ -7,6 +7,10 @@ public class ZeroedOutOffsetRange extends OffsetRange{
 	 */
 	private static final long serialVersionUID = 312856742598876248L;
 
+	public ZeroedOutOffsetRange(LongRange other) {
+		super(other);
+	}
+
 	public ZeroedOutOffsetRange(long startOffset, long length) {
 		super(startOffset, length);
 	}

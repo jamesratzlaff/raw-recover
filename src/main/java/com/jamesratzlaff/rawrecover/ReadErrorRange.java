@@ -10,6 +10,10 @@ public class ReadErrorRange extends OffsetRange implements HasMessage{
 	private static final long serialVersionUID = 7756363528338569656L;
 	private final String message;
 	
+	public ReadErrorRange(LongRange other, String message) {
+		super(other);
+		this.message=message;
+	}
 	public ReadErrorRange(long startOffset, long length, String message) {
 		super(startOffset, length);
 		this.message=message;
