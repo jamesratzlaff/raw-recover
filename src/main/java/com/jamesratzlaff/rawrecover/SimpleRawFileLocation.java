@@ -77,7 +77,7 @@ public class SimpleRawFileLocation implements RawFileLocation {
 		this(type, -1);
 	}
 
-	public long getStartOffset() {
+	public long getStart() {
 		return startOffset;
 	}
 
@@ -86,19 +86,19 @@ public class SimpleRawFileLocation implements RawFileLocation {
 	}
 
 	public void setLength(long sizeInBytes) {
-		this.endOffset = getStartOffset() + sizeInBytes;
+		this.endOffset = getStart() + sizeInBytes;
 	}
 
-	public long getEndOffset() {
+	public long getEnd() {
 		return endOffset;
 	}
 
-	public void setEndOffset(long endOffset) {
+	public void setEnd(long endOffset) {
 
 		this.endOffset = endOffset;
-		if (endOffset <= getStartOffset()) {
+		if (endOffset <= getStart()) {
 			System.err.println(getType() + "\tThe given end offset " + endOffset
-					+ " is less than or equal to the start offset " + getStartOffset() + ".");
+					+ " is less than or equal to the start offset " + getStart() + ".");
 		}
 	}
 

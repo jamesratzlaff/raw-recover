@@ -14,7 +14,9 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import com.jamesratzlaff.rawrecover.RawFileLocation;
+import com.jamesratzlaff.rawrecover.ReadErrorRange;
 import com.jamesratzlaff.rawrecover.SimpleRawFileLocation;
+import com.jamesratzlaff.rawrecover.ZeroedOutOffsetRange;
 
 public class Database {
 
@@ -46,16 +48,49 @@ public class Database {
 
 	public List<RawFileLocation> getRawOffsets() {
 		List<RawFileLocation> list = new ArrayList<RawFileLocation>();
-		Map<Long,String> urls = getURLs();
+		Map<Long, String> urls = getURLs();
 		try {
 			ResultSet rs = getConnection().createStatement().executeQuery(
-					"SELECT OFFSETS.START_OFFSET AS startOffset, OFFSETS.END_OFFSET AS endOffset, OFFSETS.ENDS_IN_PADDED_CLUSTER AS endsInPaddedCluster,  TYPES.NAME AS type, FROM OFFSETS, TYPES WHERE TYPES.ID = OFFSETS.TYPE_ID");// "SELECT OFFSETS.START_OFFSET AS startOffset, OFFSETS.END_OFFSET AS endOffset, OFFSETS.ENDS_IN_PADDED_CLUSTER AS endsInPaddedCluster, TYPES.NAME AS type,MOZ_CACHE_URLS.URL AS URL, FROM OFFSETS, TYPES,MOZ_CACHE_URLS,MOZ_CACHE_ASSOC WHERE TYPES.ID = OFFSETS.TYPE_ID");// AND MOZ_CACHE_ASSOC.OFFSET_ID = OFFSETS.START_OFFSET AND MOZ_CACHE_ASSOC.MOZ_CACHE_URL_ID = MOZ_CACHE_URLS.ID ORDER BY startOffset ASC");
+					"SELECT OFFSETS.START_OFFSET AS startOffset, OFFSETS.END_OFFSET AS endOffset, OFFSETS.ENDS_IN_PADDED_CLUSTER AS endsInPaddedCluster,  TYPES.NAME AS type, FROM OFFSETS, TYPES WHERE TYPES.ID = OFFSETS.TYPE_ID");// "SELECT
+																																																										// OFFSETS.START_OFFSET
+																																																										// AS
+																																																										// startOffset,
+																																																										// OFFSETS.END_OFFSET
+																																																										// AS
+																																																										// endOffset,
+																																																										// OFFSETS.ENDS_IN_PADDED_CLUSTER
+																																																										// AS
+																																																										// endsInPaddedCluster,
+																																																										// TYPES.NAME
+																																																										// AS
+																																																										// type,MOZ_CACHE_URLS.URL
+																																																										// AS
+																																																										// URL,
+																																																										// FROM
+																																																										// OFFSETS,
+																																																										// TYPES,MOZ_CACHE_URLS,MOZ_CACHE_ASSOC
+																																																										// WHERE
+																																																										// TYPES.ID
+																																																										// =
+																																																										// OFFSETS.TYPE_ID");//
+																																																										// AND
+																																																										// MOZ_CACHE_ASSOC.OFFSET_ID
+																																																										// =
+																																																										// OFFSETS.START_OFFSET
+																																																										// AND
+																																																										// MOZ_CACHE_ASSOC.MOZ_CACHE_URL_ID
+																																																										// =
+																																																										// MOZ_CACHE_URLS.ID
+																																																										// ORDER
+																																																										// BY
+																																																										// startOffset
+																																																										// ASC");
 			while (rs.next()) {
 				long startOffset = rs.getLong("startOffset");
 				SimpleRawFileLocation loc = new SimpleRawFileLocation(rs.getString("type"), startOffset,
 						rs.getLong("endOffset"), rs.getBoolean("endsInPaddedCluster"));
-				String url =  urls.get(startOffset);
-				if(url!=null) {
+				String url = urls.get(startOffset);
+				if (url != null) {
 					loc.setMozillaCacheUrl(url);
 				}
 				list.add(loc);
@@ -65,6 +100,27 @@ public class Database {
 			e.printStackTrace();
 		}
 		return list;
+	}
+
+	public int[] mergeZeroedOffsets(List<ZeroedOutOffsetRange> values) {
+		int[] result = null;
+
+		PreparedStatement ps;
+		try {
+			ps = getConnection().prepareStatement("MERGE INTO ZEROED_OFFSET_RANGES KEY(START_OFFSET) VALUES(?,?)");
+
+			for (int i = 0; i < values.size(); i++) {
+				ZeroedOutOffsetRange rfl = values.get(i);
+				ps.setLong(1, rfl.getStart());
+				ps.setLong(2, rfl.getLength());
+				ps.addBatch();
+			}
+			result = ps.executeBatch();
+			conn.commit();
+		} catch (SQLException e) {
+			e.printStackTrace();
+		}
+		return result;
 	}
 
 //	private void getMozCacheUrls(List<RawFileLocation> offsets) {
@@ -79,15 +135,15 @@ public class Database {
 //			}
 //	}
 
-	private Map<Long,String> getURLs(){
-		Map<Long,String>  reso = new HashMap<Long,String>();
+	private Map<Long, String> getURLs() {
+		Map<Long, String> reso = new HashMap<Long, String>();
 		try {
 			ResultSet rs = getConnection().createStatement().executeQuery(
 					"SELECT MOZ_CACHE_ASSOC.OFFSET_ID AS OFFSET_ID,MOZ_CACHE_URLS.URL AS url FROM MOZ_CACHE_URLS,MOZ_CACHE_ASSOC WHERE MOZ_CACHE_URLS.ID = MOZ_CACHE_ASSOC.MOZ_CACHE_URL_ID");
 			while (rs.next()) {
-				
-				reso.put(rs.getLong("OFFSET_ID"),rs.getString("url"));
-						
+
+				reso.put(rs.getLong("OFFSET_ID"), rs.getString("url"));
+
 			}
 		} catch (SQLException e) {
 			// TODO Auto-generated catch block
@@ -95,9 +151,9 @@ public class Database {
 		}
 		return reso;
 	}
-	
+
 	public void resetAll(List<RawFileLocation> offsets) {
-		offsets.forEach(offset -> offset.setEndOffset(-1));
+		offsets.forEach(offset -> offset.setEnd(-1));
 		merge(offsets);
 	}
 
@@ -112,6 +168,76 @@ public class Database {
 			}
 		}
 		return typePredicate;
+	}
+
+	public int[] mergeReadErrors(List<ReadErrorRange> values) {
+
+		int[] result = null;
+
+		PreparedStatement ps;
+		try {
+			ps = getConnection().prepareStatement("MERGE INTO READ_ERROR_RANGES KEY(START_OFFSET) VALUES(?,?)");
+
+			for (int i = 0; i < values.size(); i++) {
+				ReadErrorRange rfl = values.get(i);
+				ps.setLong(1, rfl.getStart());
+				ps.setLong(2, rfl.getLength());
+				ps.addBatch();
+			}
+			result = ps.executeBatch();
+			conn.commit();
+		} catch (SQLException e) {
+			e.printStackTrace();
+		}
+		mergeReadErrorAssociations(values);
+		return result;
+	}
+
+	public int[] mergeReadErrorAssociations(List<ReadErrorRange> values) {
+
+		mergeErrorMessages(values.stream().map(value -> value.getMessage()).distinct().collect(Collectors.toList()));
+
+		int[] result = null;
+		PreparedStatement ps;
+		try {
+
+			ps = getConnection().prepareStatement(
+					"MERGE INTO READ_ERROR_RANGES_MESSAGES KEY(READ_ERROR_RANGES_ID) VALUES(?,(SELECT ID FROM READ_ERROR_MESSAGES WHERE MESSAGE=?))");
+			for (int i = 0; i < values.size(); i++) {
+				ReadErrorRange rfl = values.get(i);
+				ps.setString(2, rfl.getMessage());
+				ps.setLong(1, rfl.getStart());
+				ps.addBatch();
+			}
+			result = ps.executeBatch();
+			conn.commit();
+		} catch (SQLException e) {
+			e.printStackTrace();
+		}
+		return result;
+
+	}
+
+	private int[] mergeErrorMessages(List<String> values) {
+		int[] result = null;
+		PreparedStatement ps;
+		try {
+			ps = getConnection().prepareStatement(
+					"MERGE INTO READ_ERROR_MESSAGES KEY(ID) VALUES((SELECT ID FROM READ_ERROR_MESSAGES WHERE MESSAGE=?),?)");
+
+			for (int i = 0; i < values.size(); i++) {
+				String rfl = values.get(i);
+				ps.setString(1, rfl);
+				ps.setString(2, rfl);
+				ps.addBatch();
+			}
+			result = ps.executeBatch();
+			conn.commit();
+		} catch (SQLException e) {
+			e.printStackTrace();
+		}
+		return result;
+
 	}
 
 	private int[] mergeURLS(List<String> urls) {
@@ -149,7 +275,7 @@ public class Database {
 			for (int i = 0; i < offsets.size(); i++) {
 				RawFileLocation rfl = offsets.get(i);
 				ps.setString(2, rfl.getMozillaCacheUrl());
-				ps.setLong(1, rfl.getStartOffset());
+				ps.setLong(1, rfl.getStart());
 				ps.addBatch();
 			}
 			result = ps.executeBatch();
@@ -164,7 +290,7 @@ public class Database {
 //SELECT OFFSETS.START_OFFSET AS startOffset, OFFSETS.END_OFFSET AS endOffset, TYPES.NAME AS type, (OFFSETS.END_OFFSET-OFFSETS.START_OFFSET) AS SIZE FROM OFFSETS, TYPES WHERE TYPES.ID = OFFSETS.TYPE_ID AND OFFSETS.END_OFFSET>OFFSETS.START_OFFSET ORDER BY SIZE DESC
 	public int[] merge(List<RawFileLocation> offsets) {
 		int[] result = null;
-
+		mergeTypesFromLocations(offsets);
 		PreparedStatement ps;
 		try {
 			ps = getConnection().prepareStatement(
@@ -172,8 +298,8 @@ public class Database {
 
 			for (int i = 0; i < offsets.size(); i++) {
 				RawFileLocation rfl = offsets.get(i);
-				ps.setLong(1, rfl.getStartOffset());
-				ps.setLong(2, rfl.getEndOffset());
+				ps.setLong(1, rfl.getStart());
+				ps.setLong(2, rfl.getEnd());
 				ps.setString(3, rfl.getType());
 				ps.setBoolean(4, rfl.endsInPaddedCluster());
 				ps.addBatch();
@@ -197,6 +323,32 @@ public class Database {
 				e.printStackTrace();
 			}
 		}
+	}
+	
+	private int[] mergeTypesFromLocations(List<RawFileLocation> values) {
+		return mergeTypes(values.stream().map(value->value.getType()).distinct().collect(Collectors.toList()));
+	}
+	
+	public int[] mergeTypes(List<String> values) {
+		int[] result = null;
+
+		PreparedStatement ps;
+		try {
+			ps = getConnection().prepareStatement(
+					"MERGE INTO TYPES KEY(ID) VALUES((SELECT ID FROM TYPES WHERE NAME=?),?)");
+
+			for (int i = 0; i < values.size(); i++) {
+				String str = values.get(i);
+				ps.setString(1, str);
+				ps.setString(2, str);
+				ps.addBatch();
+			}
+			result = ps.executeBatch();
+			conn.commit();
+		} catch (SQLException e) {
+			e.printStackTrace();
+		}
+		return result;
 	}
 
 	public static void main(String[] args) throws Exception {

@@ -15,11 +15,13 @@ import java.time.LocalDate;
 import java.time.Period;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.ObjLongConsumer;
 import java.util.function.Predicate;
@@ -307,11 +309,26 @@ public class RawDisk {
 		private transient long totalOpTime = 0;
 		private transient long endTime = -1;
 		private ByteBuffer bb;
-		private int readAmount = 512;
+		private int readAmount = 8192;
 		private long totalRead;
 		private long lastPosition;
 		private transient long perGigOpTime;
 		private boolean hasMore = true;
+		private boolean enableTrackers = true;
+		private boolean enableEmptyDataIndexing = false;
+		private BlankRangeTracker brt;
+		private boolean errorAggregationEnabled = false;
+		private ReadErrorRangeTracker errorRangeTracker;
+		private long limit=-1;
+
+		public boolean isErrorAggregationEnabled() {
+			return errorAggregationEnabled;
+		}
+
+		public DiskInfoCollector setErrorAggregationEnabled(boolean errorAggregationEnabled) {
+			this.errorAggregationEnabled = errorAggregationEnabled;
+			return this;
+		}
 
 		public DiskInfoCollector(RawDisk rd, List<PredicateTracker> trackers) {
 			this(rd, trackers, new ArrayList<Long>(0));
@@ -338,6 +355,13 @@ public class RawDisk {
 			}));
 		}
 
+		public BlankRangeTracker getBlankRangeTracker() {
+			if (this.brt == null) {
+				this.brt = new BlankRangeTracker();
+			}
+			return this.brt;
+		}
+
 		public DiskInfoCollector setReadAmount(int readAmount) {
 			int modAmount = readAmount % DEFAULT_SECTOR_SIZE;
 			if (modAmount != 0) {
@@ -351,6 +375,13 @@ public class RawDisk {
 				this.bb = ByteBuffer.wrap(new byte[this.readAmount]);
 			}
 			return this;
+		}
+
+		public ReadErrorRangeTracker getErrorRangeTracker() {
+			if (errorRangeTracker == null) {
+				this.errorRangeTracker = new ReadErrorRangeTracker();
+			}
+			return this.errorRangeTracker;
 		}
 
 		public long getPosition() {
@@ -367,6 +398,24 @@ public class RawDisk {
 			return this;
 		}
 
+		public DiskInfoCollector enableTracker(boolean enable) {
+			this.enableTrackers = enable;
+			return this;
+		}
+
+		public boolean trackersEnabled() {
+			return this.enableTrackers;
+		}
+
+		public DiskInfoCollector enableEmptyDataIndexing(boolean enable) {
+			this.enableEmptyDataIndexing = enable;
+			return this;
+		}
+
+		public boolean emptyDataIndexingEnabled() {
+			return this.enableEmptyDataIndexing;
+		}
+
 		public List<RawFileLocation> getFileLocations() {
 			reduce();
 			List<RawFileLocation> all = getTrackers().stream()
@@ -375,8 +424,22 @@ public class RawDisk {
 					.collect(Collectors.toList());
 			return all;
 		}
+		
+		public long limit() {
+			if(this.disk!=null&&(this.limit<0||this.limit>this.disk.size())) {
+				return this.disk.size();
+			}
+			return this.limit;
+		}
+		
+		public DiskInfoCollector limit(long limit) {
+			this.limit=limit;
+			return this;
+		}
 
 		public void search() {
+			
+			
 			long GB = 1 << 30;
 			while (nextSearch()) {
 				if (getLastPosition() % GB == 0) {
@@ -397,8 +460,17 @@ public class RawDisk {
 			}
 		}
 
+		
+		
 		public boolean hasMore() {
 			return this.hasMore;
+		}
+
+		public List<ReadErrorRange> getErrors() {
+			if (isErrorAggregationEnabled()&&(getErrorRangeTracker().getOffsetRanges()==null||getErrorRangeTracker().getOffsetRanges().isEmpty())) {
+				getErrorRangeTracker().check(skipSectors, getDisk());
+			}
+			return getErrorRangeTracker().getOffsetRanges();
 		}
 
 		public boolean nextSearch() {
@@ -408,6 +480,7 @@ public class RawDisk {
 			if (this.currentSkipSector == -1 && !this.skipSectors.isEmpty()) {
 				this.currentSkipSector = this.skipSectors.remove(0);
 			}
+			getBb();
 			if (this.disk != null && this.disk.getRemaining() > 0) {
 				long offset = this.disk.getPosition();
 				if (this.currentSkipSector > -1 && offset <= this.currentSkipSector
@@ -427,9 +500,14 @@ public class RawDisk {
 					bb.flip();
 					totalRead += bb.limit();
 					int clusters = (bb.limit() / clusterSize) + (bb.limit() % clusterSize != 0 ? 1 : 0);
+					if (emptyDataIndexingEnabled()) {
+						getBlankRangeTracker().check(offset, bb);
+					}
 					for (int i = 0; i < clusters; i++) {
 						int bb_offset = i * clusterSize;
-						trackers.forEach(tracker -> tracker.addIfAcceptable(bb, bb_offset, offset));
+						if (trackersEnabled()) {
+							trackers.forEach(tracker -> tracker.addIfAcceptable(bb, bb_offset, offset));
+						}
 					}
 
 					if (offset + clusterSize < this.disk.size()) {
@@ -546,12 +624,280 @@ public class RawDisk {
 			builder.append(", lastOpTime=");
 			builder.append(new Date(lastOp));
 			builder.append(", runtime=");
+			builder.append(", emptyDataIndex=");
+			builder.append(this.brt);
 			LocalDate start = LocalDate.ofInstant(Instant.ofEpochMilli(startTime), ZoneId.systemDefault());
 			LocalDate end = LocalDate.ofInstant(Instant.ofEpochMilli(lastOp), ZoneId.systemDefault());
 			Period p = Period.between(start, end);
 			builder.append(p.toString());
 
 			builder.append("]");
+			return builder.toString();
+		}
+
+	}
+
+	public static class BlankRangeTracker implements Serializable {
+		private static final long serialVersionUID = 111028776892660930L;
+		private final List<ZeroedOutOffsetRange> offsetRanges;
+		private ZeroedOutOffsetRange current;
+		private final transient ByteBuffer blankSector;
+		private int endsWithBlank = -1;
+
+		public void check(long offset, ByteBuffer bb) {
+			if (bb != null) {
+				int bbPos = bb.position();
+				if (offset > -1) {
+					bb.position(0);
+					byte[] buffer = new byte[blankSector.capacity()];
+					ByteBuffer temp = ByteBuffer.wrap(buffer);
+					int iterations = bb.capacity() / blankSector.capacity();
+					if (bb.capacity() % blankSector.capacity() != 0) {
+						iterations += 1;
+					}
+					int readOffset = bb.position();
+
+					for (int i = 0; i < iterations; i++) {
+						bb.get(buffer);
+
+						int mm = this.blankSector.mismatch(temp);
+						if (mm == -1) {
+							if (this.current == null) {
+
+								this.current = new ZeroedOutOffsetRange(
+										offset + readOffset + (endsWithBlank > 0 ? -endsWithBlank : 0));
+								this.offsetRanges.add(this.current);
+								if (endsWithBlank > 0) {
+									this.current.deltaLength(endsWithBlank);
+								}
+							}
+							endsWithBlank = -1;
+							this.current.deltaLength(temp.capacity());
+						} else {
+							if (this.current != null) {
+								this.current.deltaLength(mm);
+								this.current = null;
+							}
+							int zeros = endsWithBlank(temp);
+							if (zeros > 0) {
+								endsWithBlank = zeros;
+							} else {
+								endsWithBlank = -1;
+							}
+						}
+						readOffset += temp.capacity();
+					}
+				}
+				bb.position(bbPos);
+			}
+		}
+
+		private int endsWithBlank(ByteBuffer temp) {
+			int zeros = 0;
+			for (int i = temp.capacity() - 1; i > -1; i--) {
+				if (temp.get(i) == 0) {
+					zeros += 1;
+				} else {
+					break;
+				}
+			}
+			return zeros;
+		}
+
+		public BlankRangeTracker() {
+			this.offsetRanges = new ArrayList<ZeroedOutOffsetRange>();
+			this.blankSector = ByteBuffer.allocateDirect(DEFAULT_SECTOR_SIZE);
+		}
+
+		public List<ZeroedOutOffsetRange> getOffsetRanges() {
+			return offsetRanges;
+		}
+
+		@Override
+		public int hashCode() {
+			return Objects.hash(current, offsetRanges);
+		}
+
+		@Override
+		public boolean equals(Object obj) {
+			if (this == obj)
+				return true;
+			if (obj == null)
+				return false;
+			if (getClass() != obj.getClass())
+				return false;
+			BlankRangeTracker other = (BlankRangeTracker) obj;
+			return Objects.equals(current, other.current) && Objects.equals(offsetRanges, other.offsetRanges);
+		}
+
+		@Override
+		public String toString() {
+			StringBuilder builder = new StringBuilder();
+			builder.append("/*BlankRangeTracker*/ {'offsetRanges':[");
+			boolean empty = offsetRanges.isEmpty();
+			if (!empty) {
+				builder.append("\n\t");
+			}
+			builder.append(String.join(",\n\t",
+					offsetRanges.stream().sorted().map(OffsetRange::toString).collect(Collectors.toList())));
+			if (!empty) {
+				builder.append("\n");
+			}
+			builder.append("]}");
+			return builder.toString();
+		}
+
+	}
+
+	public static List<Long> getBadClusters(RawDisk rd){
+		List<Long> badClusters = new ArrayList<Long>(8192);
+		try {
+			long originalPosition = rd.getFileChannel().position();
+			rd.getFileChannel().position(0);
+			long currentOffset=0;
+			int clusterSize=4096;
+			ByteBuffer bb = ByteBuffer.allocateDirect(clusterSize);
+			int errorCounter=0;
+			int errorCounterThreshold=128;
+			boolean stop=false;
+			long start = System.currentTimeMillis();
+			long ONE_GB=1<<30;
+			while(currentOffset<rd.size()&&!stop) {
+				if(currentOffset%ONE_GB==0) {
+					long avgSpeed = getAvgMBPerSecond(start, currentOffset);
+					System.out.println((currentOffset>>>30)+"GB read, "+avgSpeed+"MB/sec");
+				}
+				try {
+					rd.read(bb, currentOffset);
+				}catch(IOException ioe) {
+					if(!"Data error (cyclic redundancy check)".equalsIgnoreCase(ioe.getMessage())) {
+						System.out.println(ioe.getMessage());
+						errorCounter+=1;
+						if(errorCounter>errorCounterThreshold) {
+							stop=true;
+						}
+					} else {
+						badClusters.add(currentOffset);
+					}
+				}
+				currentOffset+=bb.capacity();
+				bb.rewind();
+			}
+			rd.getFileChannel().position(originalPosition);
+		}catch(IOException e) {
+			e.printStackTrace();
+		}
+		return badClusters;
+		
+	}
+	
+	private static long getElapsedTime(long startTime) {
+		return System.currentTimeMillis()-startTime;
+	}
+	
+	private static long getAvgMBPerSecond(long startTime, long offset) {
+		long totalTime = getElapsedTime(startTime);
+		long timeInSeconds = totalTime/1000;
+		long offsetInMB = offset>>>20;
+		if(timeInSeconds<1) {
+			return 0;
+		}
+		return offsetInMB/timeInSeconds;
+	}
+	
+	public static class ReadErrorRangeTracker implements Serializable {
+		private static final long serialVersionUID = 111028776892660930L;
+		private final List<ReadErrorRange> offsetRanges;
+		private ReadErrorRange current;
+		private final transient ByteBuffer sectorBuffer;
+
+		public void check(List<Long> offsets, RawDisk rd) {
+			offsets.forEach(offset -> {
+				System.out.println("Checking "+offset);
+				check(offset, rd);
+			});
+		}
+
+		public void check(long offset, RawDisk rd) {
+			
+			if (rd != null) {
+				if(this.current!=null&&this.current.getEnd()!=offset) {
+					this.current=null;
+				}
+				if (offset > -1) {
+					int iterations = 4096 / sectorBuffer.capacity();
+
+					for (int i = 0; i < iterations; i++) {
+						String message = null;
+						long internalOffset = (i * sectorBuffer.capacity());
+						long readOffset = offset+internalOffset;
+						try {
+							sectorBuffer.position(0);
+							rd.read(sectorBuffer, readOffset);
+							sectorBuffer.rewind();
+						} catch (IOException ioe) {
+							message = ioe.getMessage();
+						}
+						if (message != null) {
+							if (this.current == null) {
+								this.current = new ReadErrorRange(readOffset, message);
+								this.offsetRanges.add(this.current);
+							}
+							if (this.current != null) {
+								if (!this.current.getMessage().equalsIgnoreCase(message)) {
+									this.current = new ReadErrorRange(readOffset, message);
+									this.offsetRanges.add(this.current);
+								}
+								this.current.deltaLength(sectorBuffer.capacity());
+							}
+						} else {
+							this.current = null;
+						}
+					}
+				}
+			}
+		}
+
+		public ReadErrorRangeTracker() {
+			this.offsetRanges = new ArrayList<ReadErrorRange>();
+			this.sectorBuffer = ByteBuffer.allocateDirect(DEFAULT_SECTOR_SIZE);
+		}
+
+		public List<ReadErrorRange> getOffsetRanges() {
+			return offsetRanges;
+		}
+
+		@Override
+		public int hashCode() {
+			return Objects.hash(current, offsetRanges);
+		}
+
+		@Override
+		public boolean equals(Object obj) {
+			if (this == obj)
+				return true;
+			if (obj == null)
+				return false;
+			if (getClass() != obj.getClass())
+				return false;
+			ReadErrorRangeTracker other = (ReadErrorRangeTracker) obj;
+			return Objects.equals(current, other.current) && Objects.equals(offsetRanges, other.offsetRanges);
+		}
+
+		@Override
+		public String toString() {
+			StringBuilder builder = new StringBuilder();
+			builder.append("/*ReadErrorRangeTracker*/ {'offsetRanges':[");
+			boolean empty = offsetRanges.isEmpty();
+			if (!empty) {
+				builder.append("\n\t");
+			}
+			builder.append(String.join(",\n\t",
+					offsetRanges.stream().sorted().map(OffsetRange::toString).collect(Collectors.toList())));
+			if (!empty) {
+				builder.append("\n");
+			}
+			builder.append("]}");
 			return builder.toString();
 		}
 
@@ -800,7 +1146,7 @@ public class RawDisk {
 
 		} catch (RuntimeException re) {
 			System.err.println("Exiting due to runtime exception (it could just be we reached the end of the drive)");
-			System.err.println(re);
+			re.printStackTrace();
 		} finally {
 			System.out.println(collector);
 		}
@@ -814,52 +1160,77 @@ public class RawDisk {
 		RawDisk rd = new RawDisk(args[0]);
 		rd.seekInRandomAccessFile(0x1F606000l);// 0x1F600400l);
 		long startTime = System.currentTimeMillis();
-		doQuerying(rd);
+//		doBadClusterSearch(rd);
+//		doQuerying(rd);
+//		doScanning(rd);
+		doEndSearch(rd, "HTML","XML");
 		long endTime = System.currentTimeMillis();
-		System.out.println("Total run time: "+(endTime-startTime)+" ms"); 
-		
+		System.out.println("Total run time: " + (endTime - startTime) + " ms");
+
+	}
+	
+	private static void doBadClusterSearch(RawDisk rd) {
+		List<Long> badClusters = getBadClusters(rd);
+		System.out.println("========Bad Clusters======");
+		badClusters.forEach(System.out::println);
+		System.out.println("--------Bad Clusters------");
 	}
 
 	private static void doQuerying(RawDisk rd) {
 		Database db = new Database();
-		List<RawFileLocation> locations = db.getRawOffsets().stream().filter(location->location.getEndOffset()!=-1&&!location.endsInPaddedCluster()&&location.getType().equalsIgnoreCase("JPEG")).collect(Collectors.toList());
+		List<RawFileLocation> locations = db.getRawOffsets().stream().filter(location -> location.getEnd() != -1
+				&& !location.endsInPaddedCluster() && location.getType().equalsIgnoreCase("JPEG"))
+				.collect(Collectors.toList());
 		doEndClusterSearch(db, rd, locations);
 		locations.forEach(System.out::println);
 	}
 	
+	private static void doEndSearch(RawDisk rd, String...types) {
+		Database db = new Database();
+		Set<String> typeSet = Arrays.asList(types).stream().map(type->type.toUpperCase()).collect(Collectors.toSet()); 
+		List<RawFileLocation> locations = db.getRawOffsets().stream().filter(location -> location.getEnd() == -1
+				&& !location.endsInPaddedCluster() && (typeSet.isEmpty()?true:typeSet.contains(location.getType())))
+				.sorted().collect(Collectors.toList());
+		findEnds(locations, rd);
+		locations = locations.stream().filter(location->location.getEnd()!=-1).collect(Collectors.toList());
+		db.merge(locations);
+		doEndClusterSearch(db, rd, locations);
+	}
+
 	private static void doEndClusterSearch(Database db, RawDisk rd, List<RawFileLocation> locations) {
-		locations.stream().filter(location->location.getEndOffset()!=-1).forEach(l->{
-			
+		locations.stream().filter(location -> location.getEnd() != -1 && !location.endsInPaddedCluster()).forEach(l -> {
+
 			try {
 				l.endsInPaddedCluster(rd);
 			} catch (IOException e) {
-				
+				System.err.println(e.getMessage());
 			}
 		});
-		db.merge(locations.stream().filter(location->location.endsInPaddedCluster()).collect(Collectors.toList()));
+		db.merge(locations.stream().filter(location -> location.endsInPaddedCluster()).collect(Collectors.toList()));
 	}
-	
-	
+
 	private static void doScanning(RawDisk rd) {
 		List<String> preds = PredicateMaker.config.getStringList("app.use-predicates");
 		List<PredicateTracker> trackers = preds.stream().map(PredicateTracker::new).collect(Collectors.toList());
 		List<Long> skips = PredicateMaker.config.getLongList("app.skip.values");
-		
-		
-		
 
+		DiskInfoCollector collector = new DiskInfoCollector(rd, trackers, skips).setReadAmount(8192);
+		collector.enableTracker(true).enableEmptyDataIndexing(false);
+		scanDisk(collector);
 		
-		
-
-//		DiskInfoCollector collector = new DiskInfoCollector(rd, trackers,skips).setReadAmount(8192);
-//		scanDisk(collector);
-//		List<RawFileLocation> updates = collector.getFileLocations();
-		
-//		db.merge(updates);
-		
-		
-
-		
+		Database db = new Database();
+		if(collector.emptyDataIndexingEnabled()) {
+			List<ZeroedOutOffsetRange> zeroedOut = collector.getBlankRangeTracker().getOffsetRanges();
+			db.mergeZeroedOffsets(zeroedOut);
+		}
+		List<RawFileLocation> current = db.getRawOffsets();
+		List<RawFileLocation> updates = collector.getFileLocations().stream().filter(fl->!offsetListContains(current, fl)).collect(Collectors.toList());
+		try {
+			findEnds(updates, rd);
+		}catch(Exception e) {
+			e.printStackTrace();
+		}
+		db.merge(updates);
 		
 		
 //		db.resetAll(locations);
@@ -871,24 +1242,32 @@ public class RawDisk {
 //		
 
 	}
+	
+	private static boolean offsetListContains(List<? extends LongRange> list, LongRange other) {
+		if(list==null||other==null) {
+			return false;
+		}
+		return list.stream().anyMatch(i->i.hasSameStartAs(other));
+	}
 
 	public static void printStats(List<RawFileLocation> locations) {
 		System.out.println("Total file locations: " + locations.size());
 		System.out.println("Total size of file with known end locations: "
-				+ locations.stream().filter(l -> l.getEndOffset() != -1).mapToLong(l -> l.getLength()).sum());
+				+ locations.stream().filter(l -> l.getEnd() != -1).mapToLong(l -> l.getLength()).sum());
 		System.out.println("Largest file size: "
-				+ locations.stream().filter(l -> l.getEndOffset() != -1).mapToLong(l -> l.getLength()).max().orElse(0));
+				+ locations.stream().filter(l -> l.getEnd() != -1).mapToLong(l -> l.getLength()).max().orElse(0));
 		System.out.println("Total files where end could not be found: "
-				+ locations.stream().filter(l -> l.getEndOffset() == -1).count());
+				+ locations.stream().filter(l -> l.getEnd() == -1).count());
 	}
 
 	public static void findEnds(List<RawFileLocation> rfls, RawDisk rd) {
 		for (int i = 0; i < rfls.size(); i++) {
 			RawFileLocation rfl = rfls.get(i);
-			if (rfl.getEndOffset() == -1) {
-				long start = rfl.getStartOffset();
+			if (rfl.getEnd() == -1) {
+				System.out.println("finding "+rfl);
+				long start = rfl.getStart();
 				String type = rfl.getType();
-				long maxOffset = i < rfls.size() - 1 ? rfls.get(i + 1).getStartOffset() : rd.size();
+				long maxOffset = i < rfls.size() - 1 ? rfls.get(i + 1).getStart() : rd.size();
 				long endOffset = -1;
 				try {
 					endOffset = EndOfFileGetter.getEndOffset(start, rd, maxOffset, type);
@@ -896,7 +1275,7 @@ public class RawDisk {
 					System.err.println("[ERROR]Could not get end offset for " + rfl);
 				}
 				if (endOffset != -1) {
-					rfl.setEndOffset(endOffset);
+					rfl.setEnd(endOffset);
 				}
 			}
 		}

@@ -19,7 +19,7 @@ public class ReadErrorRange extends OffsetRange implements HasMessage{
 		this.message=message;
 	}
 	public ReadErrorRange(long startOffset, String message) {
-		this(startOffset,RawDisk.DEFAULT_SECTOR_SIZE,message);
+		this(startOffset,0,message);
 	}
 	@Override
 	public int hashCode() {

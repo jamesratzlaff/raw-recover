@@ -2,7 +2,6 @@ package com.jamesratzlaff.rawrecover;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.Serializable;
 import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
@@ -13,36 +12,37 @@ import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 
 import com.jamesratzlaff.util.io.EndOfFileGetter;
-import com.jamesratzlaff.util.io.HexView;
 
-public interface RawFileLocation extends Comparable<RawFileLocation>, Serializable {
+public interface RawFileLocation  extends LongRange {
 
 	String getType();
 
-	long getStartOffset();
+	@Override
+	long getStart();
 
-	long getEndOffset();
+	@Override
+	long getEnd();
 
+	@Override
 	default long getLength() {
-		if (getEndOffset() < 0) {
+		if (getEnd() < 0) {
 			return 0;
 		}
-		return getEndOffset() - getStartOffset();
+		return getEnd() - getStart();
+	}
+	@Override
+	default void deltaLength(long delta) {
+		setLength(getLength()+delta);
+	}
+	@Override
+	default void setLength(long len) {
+		setEnd(getStart()+len);
 	}
 
-	void setEndOffset(long endOffset);
+	@Override
+	void setEnd(long endOffset);
 
-	default int compareTo(RawFileLocation other) {
-		int cmp = 0;
-		if (this.equals(other)) {
-			return cmp;
-		}
-		if (other == null) {
-			return -1;
-		}
-		return Long.compareUnsigned(this.getStartOffset(), this.getEndOffset());
-	}
-
+	
 	default boolean endsInPaddedCluster() {
 		return false;
 	}
@@ -82,9 +82,27 @@ public interface RawFileLocation extends Comparable<RawFileLocation>, Serializab
 		}
 		return -1;
 	}
+	
+	@Override
+	default int compareTo(LongRange other) {
+		int cmp=0;
+		if(this.equals(other)) {
+			return cmp;
+		}
+		if(other==null) {
+			cmp=-1;
+		}
+		if(cmp!=0) {
+			cmp=Long.compareUnsigned(this.getStart(), other.getEnd());
+		}
+		if(cmp!=0) {
+			cmp=Long.compareUnsigned(this.getEnd(), other.getEnd());
+		}
+		return cmp;
+	}
 
 	private ByteBuffer getLastCluster(RawDisk rd) throws IOException {
-		long endOffset = getEndOffset();
+		long endOffset = getEnd();
 		if (endOffset != -1) {
 			int sectorSize = RawDisk.DEFAULT_SECTOR_SIZE;
 			int sectorsPerCluster = 8;
@@ -105,9 +123,9 @@ public interface RawFileLocation extends Comparable<RawFileLocation>, Serializab
 	}
 
 	default void writeToDisk(RawDisk in, Path out) throws IOException {
-		if (this.getEndOffset() != -1) {
+		if (this.getEnd() != -1) {
 			if (out == null) {
-				String hexStr = Long.toHexString(getStartOffset());
+				String hexStr = Long.toHexString(getStart());
 				while (hexStr.length() < 16) {
 					hexStr = "0" + hexStr;
 				}
@@ -130,17 +148,17 @@ public interface RawFileLocation extends Comparable<RawFileLocation>, Serializab
 					for (int i = 0; i < fullSectors; i++) {
 						bb.clear();
 						try {
-							in.read(bb, getStartOffset() + (i * RawDisk.DEFAULT_SECTOR_SIZE));
+							in.read(bb, getStart() + (i * RawDisk.DEFAULT_SECTOR_SIZE));
 							bb.flip();
 							bytesWritten += outputFile.write(bb);
 						} catch (IOException ioe) {
 							System.err
-									.println("Could not read " + getStartOffset() + (i * RawDisk.DEFAULT_SECTOR_SIZE));
+									.println("Could not read " + getStart() + (i * RawDisk.DEFAULT_SECTOR_SIZE));
 							outputFile.write(bb);
 						}
 					}
 					if (leftOverBytes != 0) {
-						in.read(bb, getStartOffset() + (fullSectors * RawDisk.DEFAULT_SECTOR_SIZE));
+						in.read(bb, getStart() + (fullSectors * RawDisk.DEFAULT_SECTOR_SIZE));
 						bb.rewind();
 						bb.limit(leftOverBytes);
 						outputFile.write(bb);
@@ -166,7 +184,7 @@ public interface RawFileLocation extends Comparable<RawFileLocation>, Serializab
 				bb.rewind();
 				byte[] toMatch = new byte[] { 0x3A, 0x68, 0x74, 0x74, 0x70 };
 
-				long addy = EndOfFileGetter.searchFor(getEndOffset(), rd, getEndOffset() + 8192, toMatch);
+				long addy = EndOfFileGetter.searchFor(getEnd(), rd, getEnd() + 8192, toMatch);
 				if (addy != -1) {
 					bb.rewind();
 					int readOffset = getTargetAddress(bb, rd, addy);
@@ -217,9 +235,7 @@ public interface RawFileLocation extends Comparable<RawFileLocation>, Serializab
 		return truth;
 	}
 
-	default boolean containsLocation(long location) {
-		return getStartOffset() <= location && location < getEndOffset();
-	}
+	
 	/*
 	 * TODO: add methods: default boolean overlapsWith(RawFileLocation other)
 	 */
