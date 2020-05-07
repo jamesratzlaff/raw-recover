@@ -27,7 +27,6 @@ public abstract class OffsetRange implements LongRange{
 	}
 
 	
-
 	public long getLength() {
 		return this.length;
 	}

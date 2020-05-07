@@ -6,6 +6,7 @@ package com.jamesratzlaff.rawrecover;
 import java.io.Closeable;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.io.RandomAccessFile;
 import java.io.Serializable;
 import java.nio.ByteBuffer;
@@ -25,8 +26,12 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.ObjLongConsumer;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import com.jamesratzlaff.rawrecover.io.DiskDriveInfo;
+import com.jamesratzlaff.rawrecover.io.OSPhysicalDriveInfo;
+import com.jamesratzlaff.rawrecover.io.internal.WMIDiskDriveInfo;
 import com.jamesratzlaff.util.function.ObjIntBiPredicate;
 import com.jamesratzlaff.util.io.EndOfFileGetter;
 import com.jamesratzlaff.util.io.db.Database;
@@ -43,21 +48,133 @@ public class RawDisk {
 	public static final int tracks_per_cylinder = 255;
 
 	private final String resource;
+	
+	private OSPhysicalDriveInfo physicalDriveInfo;
 	private transient RandomAccessFile raf;
 	private transient FileChannel fc;
 	private transient int blockSize = 4096;
 	private long size = Long.MIN_VALUE;
+	private List<ReadErrorRange> errorRanges;
 
-	public int getBlockSize() {
-		return blockSize;
+	
+	public RawDisk() {
+		this("\\\\.\\PhysicalDrive0");
 	}
-
+	
 	public RawDisk(String resourceName) {
 		this.resource = resourceName;
 		Runtime.getRuntime().addShutdownHook(new Thread(() -> {
 			this.close();
 		}));
 	}
+	
+	/**
+	 * TODO: Add OS detection to determine which supplier to use
+	 * @return the Supplier ctor base on detected OS
+	 */
+	private static Supplier<DiskDriveInfo> getDriveInfoImplementation(){
+		return WMIDiskDriveInfo::new;
+	}
+	
+	public OSPhysicalDriveInfo getPhysicalDriveInfo() {
+		if(this.physicalDriveInfo==null) {
+			DiskDriveInfo driveInfo=getDriveInfoImplementation().get();
+			if(driveInfo!=null) {
+				this.physicalDriveInfo=driveInfo.getByDevicePath(resource);
+			}
+		}
+		return this.physicalDriveInfo;
+	}
+	
+	
+	
+	
+	
+	public int getBlockSize() {
+		return blockSize;
+	}
+
+	
+	public long writeTo(OutputStream os, LongRange lr) throws IOException {
+		return writeTo(os, lr.getStart(),lr.getEnd());
+	}
+	
+	public long writeTo(OutputStream os, long startOffset, long endOffset) throws IOException{
+		int readSize = 8192;
+		int size = (int)(endOffset-startOffset);
+		int parts = (size/readSize)+(size%readSize>0?1:0);
+		long read = 0;
+		byte[] buffer = new byte[readSize];
+		ByteBuffer bb = ByteBuffer.wrap(buffer);
+		List<ReadErrorRange> errorRanges = getErrorRangesIn(startOffset, endOffset, getErrorRanges());
+		
+		for(int i=0;i<parts;i++) {
+			bb.rewind();
+			long pos = (readSize*i)+startOffset;
+			List<ReadErrorRange> currentReadErrorRanges = getErrorRangesIn(pos, pos+readSize, errorRanges);
+			errorRanges.removeAll(currentReadErrorRanges);
+			ReadErrorRange current = null;
+			if(!currentReadErrorRanges.isEmpty()) {
+				current=currentReadErrorRanges.remove(0);
+			}
+			while(current!=null) {
+				
+				if(current.contains(pos)) {
+					long writes = Math.min(current.getLength()-(pos-current.getStart()), bb.remaining());
+					for(long j=0;j<writes;j++) {
+						bb.put((byte)0);
+						
+					}
+					pos+=writes;
+					read+=writes;
+					if(!currentReadErrorRanges.isEmpty()) {
+						current=currentReadErrorRanges.remove(0);
+					} else {
+						current=null;
+					}
+				} else {
+					int currentLimit = bb.limit();
+					long lim = current.getStart()-pos;
+					bb.limit((int)lim);
+					int currentlyRead=getFileChannel().read(bb, pos);
+					pos+=currentlyRead;
+					read+=currentlyRead;
+					bb.limit(currentLimit);
+				}
+				
+			}
+			if(bb.remaining()>0) {
+				read += getFileChannel().read(bb, pos);
+			}
+			bb.rewind();
+			
+			int off = (i==0?(int)(startOffset%bb.capacity()):0);
+			int len = (i==parts-1?(int)(endOffset%buffer.length):buffer.length-off);
+			os.write(buffer, off, len);
+		}
+		return read;
+		
+	}
+	
+	public List<ReadErrorRange> getErrorRanges(){
+		if(this.errorRanges==null) {
+			Database db = new Database();
+			this.errorRanges=db.getReadErrorRanges();
+			db.close();
+		}
+		return this.errorRanges;
+	}
+	
+	public static List<ReadErrorRange> getErrorRangesIn(long startOffset, long endOffset, List<ReadErrorRange> ranges){
+		if(ranges==null) {
+			ranges=Collections.emptyList();
+		}
+		return ranges.stream().filter(range->range.getStart()>=startOffset&&range.getEnd()<endOffset).sorted().collect(Collectors.toList());
+	}
+	
+	
+	
+	
 
 	public RandomAccessFile getRandomAccessFile() {
 		if (raf == null) {
@@ -92,7 +209,7 @@ public class RawDisk {
 	public long size() {
 		if (this.size == Long.MIN_VALUE) {
 //			try {
-			this.size = 500_107_862_016l;// getFileChannel().size();
+			this.size = getPhysicalDriveInfo().getSize();//80_026_361_856l;//500_107_862_016l;// getFileChannel().size();
 //			} catch (IOException e) {
 //				// TODO Auto-generated catch block
 //				e.printStackTrace();
@@ -153,19 +270,23 @@ public class RawDisk {
 		}
 		return bb;
 	}
+	
+	private int getBytesPerSector() {
+		return (int)getPhysicalDriveInfo().getBytesPerSector();
+	}
 
 	public ByteBuffer[] readSafely(int numberOfBytes) {
 		if (numberOfBytes > (size() - getPosition())) {
 			numberOfBytes = (int) (size() - getPosition());
 		}
-		int numberOfBuffers = numberOfBytes / DEFAULT_SECTOR_SIZE;
-		if (numberOfBytes % DEFAULT_SECTOR_SIZE != 0) {
+		int numberOfBuffers = numberOfBytes / getBytesPerSector();
+		if (numberOfBytes % getBytesPerSector() != 0) {
 			numberOfBuffers += 1;
 		}
 		ByteBuffer[] buffers = new ByteBuffer[numberOfBuffers];
 		long bytesRead = 0;
 		for (int i = 0; i < buffers.length; i++) {
-			buffers[i] = ByteBuffer.wrap(new byte[DEFAULT_SECTOR_SIZE]);
+			buffers[i] = ByteBuffer.wrap(new byte[getBytesPerSector()]);
 			try {
 				bytesRead += getFileChannel().read(buffers[i]);
 				buffers[i].rewind();
@@ -1155,15 +1276,15 @@ public class RawDisk {
 
 	public static void main(String[] args) throws Exception {
 		if (args.length < 1) {
-			args = new String[] { "\\\\.\\PhysicalDrive0" };
+			args = new String[] { "\\\\.\\PhysicalDrive3" };
 		}
 		RawDisk rd = new RawDisk(args[0]);
-		rd.seekInRandomAccessFile(0x1F606000l);// 0x1F600400l);
+		rd.seekInRandomAccessFile(0x0l);// 0x1F600400l);
 		long startTime = System.currentTimeMillis();
 //		doBadClusterSearch(rd);
 //		doQuerying(rd);
-//		doScanning(rd);
-		doEndSearch(rd, "HTML","XML");
+		doScanning(rd);
+//		doEndSearch(rd, "HTML","XML");
 		long endTime = System.currentTimeMillis();
 		System.out.println("Total run time: " + (endTime - startTime) + " ms");
 
@@ -1223,7 +1344,7 @@ public class RawDisk {
 			List<ZeroedOutOffsetRange> zeroedOut = collector.getBlankRangeTracker().getOffsetRanges();
 			db.mergeZeroedOffsets(zeroedOut);
 		}
-		List<RawFileLocation> current = db.getRawOffsets();
+		List<SimpleRawFileLocation> current = db.getRawOffsets();
 		List<RawFileLocation> updates = collector.getFileLocations().stream().filter(fl->!offsetListContains(current, fl)).collect(Collectors.toList());
 		try {
 			findEnds(updates, rd);
@@ -1234,11 +1355,11 @@ public class RawDisk {
 		
 		
 //		db.resetAll(locations);
-//		List<RawFileLocation> locations = loadLocationsFromConfig("MP4","JPEG","RIFF","PNG","SQLITE","WEBM","ASF");
+		List<RawFileLocation> locations = loadLocationsFromConfig("MP4","JPEG","RIFF","PNG","SQLITE","WEBM","ASF");
 
-//		findEnds(locations,rd);
-//		printStats(locations);
-//		db.merge(locations);
+		findEnds(locations,rd);
+		printStats(locations);
+		db.merge(locations);
 //		
 
 	}
@@ -1291,7 +1412,7 @@ public class RawDisk {
 		Collections.sort(reso);
 		return reso;
 	}
-
+	
 	public static List<RawFileLocation> loadLocationsFromConfig(String... types) {
 		ArrayList<RawFileLocation> l = new ArrayList<RawFileLocation>();
 		for (int i = 0; i < types.length; i++) {

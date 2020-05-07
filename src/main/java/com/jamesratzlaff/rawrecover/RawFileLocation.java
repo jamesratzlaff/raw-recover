@@ -43,6 +43,10 @@ public interface RawFileLocation  extends LongRange {
 	void setEnd(long endOffset);
 
 	
+	default boolean getEndsInPaddedCluster() {
+		return endsInPaddedCluster();
+	}
+	
 	default boolean endsInPaddedCluster() {
 		return false;
 	}
@@ -52,7 +56,7 @@ public interface RawFileLocation  extends LongRange {
 	void setMozillaCacheUrl(String cacheUrl);
 
 	void endsInPaddedCluster(boolean endInPaddedCluster);
-
+	
 	private int getTargetAddress(ByteBuffer bb, RawDisk rd, long offset) throws IOException {
 
 		int sectorSize = RawDisk.DEFAULT_SECTOR_SIZE;

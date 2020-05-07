@@ -1,5 +1,6 @@
 package com.jamesratzlaff.rawrecover;
 
+import java.beans.Transient;
 import java.io.Serializable;
 import java.util.function.BiPredicate;
 
@@ -8,6 +9,7 @@ public interface LongRange extends Serializable, Comparable<LongRange> {
 		return getStart() + getLength();
 	}
 
+	@Transient
 	long getLength();
 
 	void setLength(long len);
