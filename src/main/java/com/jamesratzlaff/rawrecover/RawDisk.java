@@ -301,7 +301,7 @@ public class RawDisk {
 
 	public ByteBuffer readSafelyIntoBuffer(int numberOfBytes) {
 		ByteBuffer[] buffers = readSafely(numberOfBytes);
-		ByteBuffer bb = ByteBuffer.wrap(new byte[buffers.length * DEFAULT_SECTOR_SIZE]);
+		ByteBuffer bb = ByteBuffer.wrap(new byte[buffers.length * getBytesPerSector()]);
 		for (int i = 0; i < buffers.length; i++) {
 			bb.put(buffers[i]);
 		}
@@ -325,7 +325,7 @@ public class RawDisk {
 	public ByteBuffer read(ByteBuffer bb, long offset) throws IOException {
 
 		if (bb == null) {
-			byte[] bs = new byte[DEFAULT_SECTOR_SIZE];
+			byte[] bs = new byte[getBytesPerSector()];
 			bb = ByteBuffer.wrap(bs);
 		}
 
@@ -344,7 +344,7 @@ public class RawDisk {
 	public ByteBuffer read(ByteBuffer bb) {
 
 		if (bb == null) {
-			byte[] bs = new byte[DEFAULT_SECTOR_SIZE];
+			byte[] bs = new byte[getBytesPerSector()];
 			bb = ByteBuffer.wrap(bs);
 		}
 		try {
@@ -484,12 +484,12 @@ public class RawDisk {
 		}
 
 		public DiskInfoCollector setReadAmount(int readAmount) {
-			int modAmount = readAmount % DEFAULT_SECTOR_SIZE;
+			int modAmount = readAmount % disk.getBytesPerSector();
 			if (modAmount != 0) {
-				readAmount = ((readAmount / DEFAULT_SECTOR_SIZE) + 1) * DEFAULT_SECTOR_SIZE;
+				readAmount = ((readAmount / disk.getBytesPerSector()) + 1) * disk.getBytesPerSector();
 			}
-			if (readAmount < DEFAULT_SECTOR_SIZE) {
-				readAmount = DEFAULT_SECTOR_SIZE;
+			if (readAmount < disk.getBytesPerSector()) {
+				readAmount = disk.getBytesPerSector();
 			}
 			if (this.readAmount != readAmount) {
 				this.readAmount = readAmount;
@@ -1284,7 +1284,7 @@ public class RawDisk {
 //		doBadClusterSearch(rd);
 //		doQuerying(rd);
 		doScanning(rd);
-//		doEndSearch(rd, "HTML","XML");
+		doEndSearch(rd, "MP4","HTML","XML");
 		long endTime = System.currentTimeMillis();
 		System.out.println("Total run time: " + (endTime - startTime) + " ms");
 
@@ -1336,7 +1336,7 @@ public class RawDisk {
 		List<Long> skips = PredicateMaker.config.getLongList("app.skip.values");
 
 		DiskInfoCollector collector = new DiskInfoCollector(rd, trackers, skips).setReadAmount(8192);
-		collector.enableTracker(true).enableEmptyDataIndexing(false);
+		collector.enableTracker(true).enableEmptyDataIndexing(true);
 		scanDisk(collector);
 		
 		Database db = new Database();
@@ -1355,11 +1355,11 @@ public class RawDisk {
 		
 		
 //		db.resetAll(locations);
-		List<RawFileLocation> locations = loadLocationsFromConfig("MP4","JPEG","RIFF","PNG","SQLITE","WEBM","ASF");
+//		List<RawFileLocation> locations = loadLocationsFromConfig("MP4","JPEG","RIFF","PNG","SQLITE","WEBM","ASF");
 
-		findEnds(locations,rd);
-		printStats(locations);
-		db.merge(locations);
+//		findEnds(locations,rd);
+//		printStats(locations);
+//		db.merge(locations);
 //		
 
 	}
