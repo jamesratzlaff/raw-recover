@@ -2,7 +2,10 @@ package com.jamesratzlaff.rawrecover;
 
 import java.beans.Transient;
 import java.io.Serializable;
-import java.util.function.BiPredicate;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 
 public interface LongRange extends Serializable, Comparable<LongRange> {
 	default long getEnd() {
@@ -129,6 +132,92 @@ public interface LongRange extends Serializable, Comparable<LongRange> {
 		return other.isCompletelyBefore(this);
 	}
 	
+	
+	public static LongRange min(LongRange a, LongRange b) {
+		if(a.compareTo(b)<0) {
+			return a;
+		}
+		return b;
+	}
+	
+	public static LongRange max(LongRange a, LongRange b) {
+		if(a.compareTo(b)>0) {
+			return a;
+		}
+		return b;
+	}
+	
+	public static LongRange mergeIfAdjacent(LongRange a, LongRange b) {
+		int adjacency = a!=null?a.isAdjacentTo(b):0;
+		if(adjacency==0) {
+			return null;
+		}
+		long len = a.getLength()+b.getLength();
+		if(adjacency<0) {
+			return new ArbitraryRange(a.getStart(), len);
+		}
+		return new ArbitraryRange(b.getStart(), len);
+	}
+	
+	public static LongRange arbitraryMerge(LongRange a, LongRange b) {
+		
+		LongRange min = min(a,b);
+		LongRange max = max(a,b);
+		long start = min.getStart();
+		long end = max.getEnd();
+		return new ArbitraryRange(start, end-start);
+	}
+	
+	private static int getMaxAdjacentIndex(List<? extends LongRange> sortedRanges, int startIndex) {
+		int result = -1;
+		LongRange a = sortedRanges.get(startIndex);
+		for(int i=startIndex+1;i<sortedRanges.size();i++) {
+			LongRange b=sortedRanges.get(i);
+			if(a.isAdjacentTo(b)!=0) {
+				result=i;
+				a=b;
+			} else {
+				break;
+			}
+		}
+		return result;
+	}
+	
+	public static List<LongRange> mergeAdjacents(List<? extends LongRange> ranges) {
+		List<LongRange> result = new ArrayList<LongRange>();
+		Collections.sort(ranges);
+		for(int i=0;i<ranges.size();i++) {
+			int endAdj = getMaxAdjacentIndex(ranges, i);
+			LongRange current = ranges.get(i);
+			if(endAdj!=-1) {
+				LongRange toMerge = ranges.get(endAdj);
+				current = arbitraryMerge(current, toMerge);
+				i=endAdj;
+			}
+			result.add(current);
+		}
+		return result;
+	}
+	
+	public static void main(String[] args) {
+		ArbitraryRange a = new ArbitraryRange(0, 4);
+		ArbitraryRange b = new ArbitraryRange(4, 1);
+		ArbitraryRange c = new ArbitraryRange(5, 1);
+		ArbitraryRange d = new ArbitraryRange(6, 1);
+		ArbitraryRange e = new ArbitraryRange(7, 1);
+		ArbitraryRange f = new ArbitraryRange(8, 1);
+		
+		List<ArbitraryRange> all = Arrays.asList(a,b,c,d,e,f);
+		for(int i=0;i<all.size();i++) {
+			ArbitraryRange current = all.get(i);
+			int maxAdj = getMaxAdjacentIndex(all, i);
+			System.out.println("("+i+")"+current+" : "+maxAdj);
+		}
+		System.out.println(mergeAdjacents(all));
+		
+		
+		
+	}
 	
 	public static boolean aEndsIsBeforeBEnds(LongRange a, LongRange b) {
 		if(a==null||b==null) {

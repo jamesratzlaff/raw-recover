@@ -6,9 +6,8 @@ import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Paths;
-import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
+import java.util.function.Predicate;
 
 import com.jamesratzlaff.rawrecover.RawDisk;
 
@@ -427,7 +426,7 @@ public class EndOfFileGetter {
 	 * @return the offset within the ByteBuffer to seek to
 	 * @throws IOException
 	 */
-	private static int populateByteBufferWithDataFromLocation(long diskStartOffset, int lenToSeek, ByteBuffer bb,
+	public static int populateByteBufferWithDataFromLocation(long diskStartOffset, int lenToSeek, ByteBuffer bb,
 			RawDisk rd) throws IOException {
 		long actualOffset = diskStartOffset + lenToSeek;
 		if (lenToSeek < 0) {
@@ -443,6 +442,10 @@ public class EndOfFileGetter {
 		return seekOffset;
 
 	}
+	
+//	public static long getPotentialEndOffset(long zeroedOutStartOffsetOrClusterStartOffset, Predicate<ByteBuffer> predicate, RawDisk rd) {
+//		
+//	}
 
 	private static int populateByteBufferWithDataFromLocation(long diskStartOffset, int lenToSeek, ByteBuffer bb,
 			FileChannel rd) throws IOException {

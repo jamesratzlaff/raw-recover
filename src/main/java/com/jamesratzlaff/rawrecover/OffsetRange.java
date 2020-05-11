@@ -39,7 +39,7 @@ public abstract class OffsetRange implements LongRange{
 		this.length = len;
 	}
 
-
+	
 	/**
 	 * 
 	 * @return the inclusive start offset of this range

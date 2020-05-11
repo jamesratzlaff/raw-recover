@@ -12,8 +12,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import com.jamesratzlaff.rawrecover.LongRange;
 import com.jamesratzlaff.rawrecover.PredicateMaker;
 import com.jamesratzlaff.rawrecover.RawFileLocation;
 import com.jamesratzlaff.rawrecover.ReadErrorRange;
@@ -24,7 +26,17 @@ public class Database {
 
 	private Connection conn;
 
+	private final String dbLocation;
+
 	public Database() {
+		this((String) null);
+	}
+
+	public Database(String dbLocation) {
+		if (dbLocation == null) {
+			dbLocation = "~/.rawrecover/rawrecover3";
+		}
+		this.dbLocation = dbLocation;
 		Runtime.getRuntime().addShutdownHook(new Thread(() -> {
 			this.close();
 		}));
@@ -35,7 +47,7 @@ public class Database {
 			if (this.conn == null || conn.isClosed()) {
 				try {
 
-					conn = DriverManager.getConnection("jdbc:h2:~/.rawrecover/rawrecover3", "rawrecover", "recoverme!");
+					conn = DriverManager.getConnection("jdbc:h2:" + dbLocation, "rawrecover", "recoverme!");
 
 				} catch (SQLException e) {
 					e.printStackTrace();
@@ -52,13 +64,14 @@ public class Database {
 		List<SimpleRawFileLocation> list = new ArrayList<SimpleRawFileLocation>();
 		Map<Long, String> urls = getURLs();
 		try {
-			String n8tive = getConnection().nativeSQL("SELECT OFFSETS.START_OFFSET AS startOffset, OFFSETS.END_OFFSET AS endOffset, OFFSETS.ENDS_IN_PADDED_CLUSTER AS endsInPaddedCluster, TYPES.NAME AS TYPE FROM OFFSETS, PUBLIC.TYPES WHERE TYPES.ID = OFFSETS.TYPE_ID ORDER BY startOffset");
+			String n8tive = getConnection().nativeSQL(
+					"SELECT OFFSETS.START_OFFSET AS startOffset, OFFSETS.END_OFFSET AS endOffset, OFFSETS.ENDS_IN_PADDED_CLUSTER AS endsInPaddedCluster, TYPES.NAME AS TYPE FROM OFFSETS, PUBLIC.TYPES WHERE TYPES.ID = OFFSETS.TYPE_ID ORDER BY startOffset");
 			Statement s = getConnection().createStatement();
-			
+
 			ResultSet rs = s.executeQuery(n8tive);
 			while (rs.next()) {
 				long startOffset = rs.getLong("startOffset");
-				
+
 				SimpleRawFileLocation loc = new SimpleRawFileLocation(rs.getString("type"), startOffset,
 						rs.getLong("endOffset"), rs.getBoolean("endsInPaddedCluster"));
 				String url = urls.get(startOffset);
@@ -94,19 +107,19 @@ public class Database {
 		}
 		return result;
 	}
-	
-	public List<ZeroedOutOffsetRange> getZeroedOutOffsetRanges(){
+
+	public List<ZeroedOutOffsetRange> getZeroedOutOffsetRanges() {
 		List<ZeroedOutOffsetRange> list = new ArrayList<ZeroedOutOffsetRange>();
 		try {
 			Statement s = getConnection().createStatement();
 			ResultSet rs = s.executeQuery("SELECT * FROM ZEROED_OFFSET_RANGES ORDER BY START_OFFSET");
-			while(rs.next()) {
+			while (rs.next()) {
 				long start = rs.getLong("START_OFFSET");
 				long len = rs.getLong("LENGTH");
 				list.add(new ZeroedOutOffsetRange(start, len));
 			}
-			
-		}catch(SQLException e) {
+
+		} catch (SQLException e) {
 			e.printStackTrace();
 		}
 		return list;
@@ -157,6 +170,34 @@ public class Database {
 			}
 		}
 		return typePredicate;
+	}
+
+	public List<LongRange> getAccountedForRanges() {
+		return getAccountedForRanges(true);
+	}
+
+	private List<LongRange> getAll(boolean includeReadErrors) {
+		List<LongRange> all = new ArrayList<LongRange>();
+		all.addAll(getRawOffsets());
+		all.addAll(getZeroedOutOffsetRanges());
+		if (includeReadErrors) {
+			all.addAll(getReadErrorRanges());
+		}
+		return all;
+
+	}
+
+	public List<LongRange> getAccountedForRanges(boolean includeReadErrors) {
+		List<LongRange> all = getAll(includeReadErrors);
+		System.out.println(all.size());
+		all = LongRange.mergeAdjacents(all);
+		System.out.println(all.size());
+		all.stream().filter(lr -> lr instanceof RawFileLocation && lr.getLength() <= 0)
+				.forEach(lr -> lr.setLength(4096));
+		all = LongRange.mergeAdjacents(all);
+		System.out.println(all.size());
+		return all;
+
 	}
 
 	public int[] mergeReadErrors(List<ReadErrorRange> values) {
@@ -280,6 +321,25 @@ public class Database {
 
 	}
 
+	public long getStartOffsetAfter(long startOffset) {
+		final String query = "SELECT MIN(START_OFFSET) AS NEXT_START FROM OFFSETS WHERE START_OFFSET > ?";
+		long reso = -1;
+		
+		try (PreparedStatement ps = getConnection().prepareStatement(query)) {
+			ps.setLong(1, startOffset);
+			try (ResultSet rs = ps.executeQuery()){
+				if(rs.first()) {
+					reso = rs.getLong(1);
+				}
+			}
+			
+		} catch (SQLException e) {
+			e.printStackTrace();
+		}
+
+		return reso;
+	}
+
 	public int[] mergeURLAssociations(List<RawFileLocation> locations) {
 		List<RawFileLocation> offsets = locations.stream().filter(location -> location.getMozillaCacheUrl() != null)
 				.collect(Collectors.toList());
@@ -371,10 +431,12 @@ public class Database {
 
 	public static void main(String[] args) throws Exception {
 		Database db = new Database();
-		List<SimpleRawFileLocation> locations = db.getRawOffsets();
-		SimpleRawFileLocation srfl = new SimpleRawFileLocation("ASF", 0, -1);
-		srfl.setMozillaCacheUrl("https://example.com/?a.jpg");
-		db.merge(Arrays.asList(srfl));
+		List<LongRange> accountedFor = db.getAccountedForRanges();
+		System.out.println(accountedFor.stream().mapToLong(lr -> lr.getLength()).summaryStatistics());
+//		List<SimpleRawFileLocation> locations = db.getRawOffsets();
+//		SimpleRawFileLocation srfl = new SimpleRawFileLocation("ASF", 0, -1);
+//		srfl.setMozillaCacheUrl("https://example.com/?a.jpg");
+//		db.merge(Arrays.asList(srfl));
 //		locations.get(0).setEndOffset(4);
 //		int[] reso = db.merge(locations);
 //		System.out.println(Arrays.toString(reso));

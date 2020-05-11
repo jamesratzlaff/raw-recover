@@ -58,7 +58,7 @@ public class RawDisk {
 
 	
 	public RawDisk() {
-		this("\\\\.\\PhysicalDrive0");
+		this("\\\\.\\PhysicalDrive3");
 	}
 	
 	public RawDisk(String resourceName) {
@@ -148,7 +148,7 @@ public class RawDisk {
 			}
 			bb.rewind();
 			
-			int off = (i==0?(int)(startOffset%bb.capacity()):0);
+			int off = (i==0?(int)(startOffset%getBytesPerSector()):0);
 			int len = (i==parts-1?(int)(endOffset%buffer.length):buffer.length-off);
 			os.write(buffer, off, len);
 		}
