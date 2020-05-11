@@ -182,7 +182,7 @@ public class EndOfFileGetter {
 		return toRead;
 	}
 
-	private static byte[] getAsASCIIBytes(String str) {
+	public static byte[] getAsASCIIBytes(String str) {
 		return str.getBytes(StandardCharsets.US_ASCII);
 	}
 
@@ -285,7 +285,7 @@ public class EndOfFileGetter {
 				ByteBuffer bb = ByteBuffer.wrap(new byte[initialBufferSize]).order(ByteOrder.LITTLE_ENDIAN);
 				long sizeDataOffset = filePropertiesGuidLocation + ASF_FILE_PROP_GUID.length + 8
 						+ ASF_FILE_PROP_GUID.length;
-				long addressContainingSizeData = RawDisk.getContainingSectorOffset(sizeDataOffset);
+				long addressContainingSizeData = rd.getContainingSectorOffset(sizeDataOffset);
 				long diffOffset = sizeDataOffset - addressContainingSizeData;
 				rd.read(bb, addressContainingSizeData);
 				result = bb.getLong((int) diffOffset);
@@ -306,7 +306,7 @@ public class EndOfFileGetter {
 		return result;
 	}
 
-	private static byte[] toByteArray(int... ints) {
+	public static byte[] toByteArray(int... ints) {
 		byte[] asBytes = new byte[ints.length];
 		for (int i = 0; i < ints.length; i++) {
 			asBytes[i] = (byte) ints[i];

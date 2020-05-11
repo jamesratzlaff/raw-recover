@@ -49,7 +49,7 @@ public class HiveBin {
 	}
 	
 	private void reset() {
-		size=0;
+		size=-1;
 		spareOrMemAlloc=0;
 		timeStamp=null;
 		offset=-1;

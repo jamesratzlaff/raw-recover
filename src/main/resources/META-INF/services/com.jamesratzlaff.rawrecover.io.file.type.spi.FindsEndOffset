@@ -1,2 +1,8 @@
 com.jamesratzlaff.rawrecover.io.file.type.impl.JpegEndFinder
 com.jamesratzlaff.rawrecover.io.file.type.impl.Mp4Sizer
+com.jamesratzlaff.rawrecover.io.file.type.impl.HiveBinSizer
+com.jamesratzlaff.rawrecover.io.file.type.impl.AsfSizer
+com.jamesratzlaff.rawrecover.io.file.type.impl.RiffSizer
+com.jamesratzlaff.rawrecover.io.file.type.impl.PngEndFinder
+com.jamesratzlaff.rawrecover.io.file.type.impl.HtmlEndFinder
+com.jamesratzlaff.rawrecover.io.file.type.impl.XmlEndFinder

@@ -1,5 +1,6 @@
 package com.jamesratzlaff.rawrecover.io.file.type;
 
+import java.io.IOException;
 import java.io.Serializable;
 import java.util.Objects;
 
@@ -14,78 +15,82 @@ public class EndOffsetOrSize implements Serializable {
 	private static final long serialVersionUID = -3356299562075404394L;
 	private final long startOffset;
 	private final String type;
-	private long endOffsetOrSize=Long.MIN_VALUE;
-	
+	private long endOffsetOrSize = Long.MIN_VALUE;
+
 	private final long readLimit;
 	private final RawDisk rd;
-	private boolean isValid=false;
-	private boolean isCalculatedSize=true;
-	
+	private boolean isValid = false;
+	private boolean isCalculatedSize = true;
+
 	public EndOffsetOrSize(long startOffset, String type, long readLimit, RawDisk rd) {
-		this.startOffset=startOffset;
-		this.type=type;
-		this.readLimit=readLimit;
-		this.rd=rd;
+		this.startOffset = startOffset;
+		this.type = type;
+		this.readLimit = readLimit;
+		this.rd = rd;
 	}
-	
+
 	public long getEndOffsetOrSize() {
-		if(endOffsetOrSize==Long.MIN_VALUE) {
+		if (endOffsetOrSize == Long.MIN_VALUE) {
 			FindsEndOffset feo = FileEndOffsetServiceImpl.Instance.get().getEndFinder(getType());
-			if(feo==null) {
+			if (feo == null) {
 				return this.endOffsetOrSize;
 			}
-			this.isCalculatedSize=feo.calculatesSize();
-			if(isCalculatedSize) {
-					this.endOffsetOrSize=feo.calculateSize(startOffset, rd, readLimit);
-			} else {
-				this.endOffsetOrSize=feo.getEndOffset(startOffset, rd, readLimit);
-			}
-			if(this.getEndOffsetOrSize()>-1) {
-				long end=this.endOffsetOrSize;
-				if(this.isCalculatedSize) {
-					end+=this.startOffset;
+			this.isCalculatedSize = feo.calculatesSize();
+			try {
+				if (isCalculatedSize) {
+					this.endOffsetOrSize = feo.calculateSize(startOffset, rd, readLimit);
+				} else {
+					this.endOffsetOrSize = feo.getEndOffset(startOffset, rd, readLimit);
 				}
-				if(end<=readLimit) {
-					this.isValid=true;
+			} catch (IOException ioe) {
+				ioe.printStackTrace();
+			}
+			if (this.getEndOffsetOrSize() > -1) {
+				long end = this.endOffsetOrSize;
+				if (this.isCalculatedSize) {
+					end += this.startOffset;
+				}
+				if (end <= readLimit) {
+					this.isValid = true;
 				}
 			}
 		}
 		return this.endOffsetOrSize;
 	}
-	
+
 	public boolean isValid() {
 		return this.isValid;
 	}
-	
+
 	private void initIfNecessary() {
-		if(endOffsetOrSize==Long.MIN_VALUE) {
+		if (endOffsetOrSize == Long.MIN_VALUE) {
 			getEndOffsetOrSize();
 		}
 	}
-	
+
 	public long getSize() {
 		initIfNecessary();
 		long reso = getEndOffsetOrSize();
-		if(!isCalculatedSize()&&reso>0) {
-			reso-=this.startOffset;
+		if (!isCalculatedSize() && reso > 0) {
+			reso -= this.startOffset;
 		}
 		return reso;
 	}
-	
+
 	public long getEndOffset() {
 		initIfNecessary();
 		long reso = getEndOffsetOrSize();
-		if(isCalculatedSize()&&reso>0) {
-			return reso+=this.startOffset;
+		if (isCalculatedSize() && reso > 0) {
+			return reso += this.startOffset;
 		}
 		return reso;
 	}
-	
+
 	public boolean isCalculatedSize() {
 		initIfNecessary();
 		return this.isCalculatedSize;
 	}
-	
+
 	public String getType() {
 		return this.type;
 	}
@@ -111,7 +116,7 @@ public class EndOffsetOrSize implements Serializable {
 
 	@Override
 	public String toString() {
-		if(autoInitWithToString) {
+		if (autoInitWithToString) {
 			initIfNecessary();
 		}
 		StringBuilder builder = new StringBuilder();
@@ -130,13 +135,5 @@ public class EndOffsetOrSize implements Serializable {
 		builder.append("]");
 		return builder.toString();
 	}
-	
-	
-	
-	
-	
-	
-	
-	
-	
+
 }

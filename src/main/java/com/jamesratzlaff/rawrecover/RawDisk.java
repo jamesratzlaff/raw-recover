@@ -318,9 +318,11 @@ public class RawDisk {
 		return Long.MAX_VALUE;
 	}
 
-	public static long getContainingSectorOffset(long offset) {
-		return ((offset / DEFAULT_SECTOR_SIZE) * DEFAULT_SECTOR_SIZE);
+	public long getContainingSectorOffset(long offset) {
+		return ((offset / getBytesPerSector()) * getBytesPerSector());
 	}
+	
+	
 
 	public ByteBuffer read(ByteBuffer bb, long offset) throws IOException {
 

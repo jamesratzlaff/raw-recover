@@ -19,9 +19,8 @@ public class JpegEndFinder implements FindsEndOffset {
 	}
 
 	@Override
-	public long getEndOffset(long startOffset, RawDisk rd, long offsetLimit) {
+	public long getEndOffset(long startOffset, RawDisk rd, long offsetLimit) throws IOException {
 		long result = -1;
-		try {
 			result = EndOfFileGetter.searchFor(startOffset, rd, offsetLimit, JPEG_END);
 			ByteBuffer bb = ByteBuffer.wrap(new byte[8192]).order(ByteOrder.BIG_ENDIAN);
 			bb = rd.read(bb, startOffset).order(ByteOrder.BIG_ENDIAN);
@@ -37,9 +36,6 @@ public class JpegEndFinder implements FindsEndOffset {
 			if (result != -1) {
 				result += JPEG_END.length;
 			}
-		} catch (IOException e) {
-			e.printStackTrace();
-		}
 		return result;
 	}
 	
